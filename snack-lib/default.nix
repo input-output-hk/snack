@@ -1,10 +1,17 @@
 # This is the entry point of the library, and badly needs documentation.
 # TODO: currently single out derivations prepend the PWD to the path
 # TODO: make sure that filters for "base" are airtight
-{ pkgs
+{ lib
+, haskellPackages
+, makeWrapper
+, rsync
+, stdenv
+, symlinkJoin
+, writeScriptBin
+, writeText
+, runCommand
+, callPackage
 }:
-
-with pkgs;
 
 with (callPackage ./build.nix {});
 with (callPackage ./files.nix {});
