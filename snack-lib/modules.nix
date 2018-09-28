@@ -60,11 +60,11 @@ rec {
     # XXX: this command needs ghc in the environment so that it can call "ghc
     # --print-libdir"...
     in runCommand "dependencies-json"
-      {   buildInputs = [ ghc glibcLocales ];
+      {   buildInputs = [ ghc glibcLocales haskellPackages.cpphs ];
           LANG="en_US.utf-8";
       }
 
         ''
-          ${importParser} ${singleOutModulePath base modName} > $out
+          ${importParser} -XRankNTypes -XLambdaCase -XTypeApplications -XBangPatterns -pgmP cpphs -optP --cpp ${singleOutModulePath base modName} > $out
         '';
 }
