@@ -18,14 +18,16 @@ rec {
   buildMain = ghcWith: mainModSpec:
     buildModulesRec ghcWith
       # XXX: the main modules need special handling regarding the object name
-      { "${mainModSpec.moduleName}" =
-        "${buildModule ghcWith mainModSpec}/Main.o";}
+      {
+        a."${mainModSpec.moduleName}" = mainModSpec;
+        b."${mainModSpec.moduleName}" = "${buildModule ghcWith mainModSpec}/Main.o";
+      }
       mainModSpec.moduleImports;
 
   # returns a attrset where the keys are the module names and the values are
   # the modules' object file path
   buildLibrary = ghcWith: modSpecs:
-    buildModulesRec ghcWith {} modSpecs;
+    buildModulesRec ghcWith { a = {}; b = {}; } modSpecs;
 
   linkMainModule = ghcWith: mod: # main module
     let
@@ -54,34 +56,44 @@ rec {
   # Build the given modules (recursively) using the given accumulator to keep
   # track of which modules have been built already
   # XXX: doesn't work if several modules in the DAG have the same name
-  buildModulesRec = ghcWith: empty: modSpecs:
-    foldDAG
-      { f = mod:
-          { "${mod.moduleName}" =
-            "${buildModule ghcWith mod}/${moduleToObject mod.moduleName}";
-          };
+  buildModulesRec = ghcWith: empty: modSpecs: let
+      flattenModNamesFold = {
+        f = modSpec: {
+          ${modSpec.moduleName} = modSpec;
+        };
         elemLabel = mod: mod.moduleName;
         elemChildren = mod: mod.moduleImports;
         reduce = a: b: a // b;
-        empty = empty;
-      }
-      modSpecs;
+        empty = empty.a;
+      };
+      allModules = builtins.attrValues (foldDAG flattenModNamesFold modSpecs);
+    in foldDAG
+    {
+      f = mod: {
+        "${mod.moduleName}" = "${mod.builtModule}/${moduleToObject mod.moduleName}";
+      };
+      elemLabel = mod: mod.moduleName;
+      elemChildren = mod: [];
+      reduce = a: b: a // b;
+      empty = empty.b;
+    }
+    allModules;
 
   buildModule = ghcWith: modSpec:
     let
       ghc = ghcWith deps;
-      deps = allTransitiveDeps [modSpec];
+      deps = modSpec.allTransitiveDeps;
       exts = modSpec.moduleExtensions;
       ghcOpts = modSpec.moduleGhcOpts ++ (map (x: "-X${x}") exts);
       ghcOptsArgs = lib.strings.escapeShellArgs ghcOpts;
       objectName = modSpec.moduleName;
-      builtDeps = map (buildModule ghcWith) (allTransitiveImports [modSpec]);
+      builtDeps = map (modSpec: modSpec.builtModule) (allTransitiveImports [modSpec]);
       depsDirs = map (x: x + "/") builtDeps;
       base = modSpec.moduleBase;
       makeSymtree =
         if lib.lists.length depsDirs >= 1
         # TODO: symlink instead of copy
-        then "rsync -r ${lib.strings.escapeShellArgs depsDirs} ."
+        then "rsync -r --chmod=D+w ${lib.strings.escapeShellArgs depsDirs} ."
         else "";
       makeSymModule =
         # TODO: symlink instead of copy
@@ -110,12 +122,14 @@ rec {
                 modSpec.moduleFiles
             ) >= 1
         ) base;
-    in stdenv.mkDerivation
-    { name = objectName;
-      src = symlinkJoin
-        { name = "extra-files";
-          paths = [ extraFiles ] ++ modSpec.moduleDirectories;
-        };
+      joinedSrc = symlinkJoin {
+        name = "extra-files";
+        paths = [ extraFiles ] ++ modSpec.moduleDirectories;
+      };
+      src' = if builtins.length ([ extraFiles ] ++ modSpec.moduleDirectories) == 1 then builtins.head ([ extraFiles ] ++ modSpec.moduleDirectories) else joinedSrc;
+    in stdenv.mkDerivation {
+      name = objectName;
+      src = src';
       phases =
         [ "unpackPhase" "buildPhase" ];
 
@@ -133,11 +147,24 @@ rec {
           ${makeSymtree}
           echo "Creating module symlink for module ${modSpec.moduleName}"
           ${makeSymModule}
+          if [ -f Pos/Util/CompileInfoGit.o ]; then
+            mkdir -pv $out/Pos/Util
+            cp -v Pos/Util/CompileInfoGit.{o,dyn_o} $out/Pos/Util
+          fi
+          if [ -f Pos/Binary/Class/TH.o ]; then
+            mkdir -pv $out/Pos/Binary/Class
+            cp -v Pos/Binary/Class/TH.{o,dyn_o} $out/Pos/Binary/Class
+          fi
+          if [ -f Pos/Binary/Class/Core.o ]; then
+            mkdir -pv $out/Pos/Binary/Class
+            cp -v Pos/Binary/Class/Core.{o,dyn_o} $out/Pos/Binary/Class
+          fi
           echo "Compiling module ${modSpec.moduleName}"
           # Set a tmpdir we have control over, otherwise GHC fails, not sure why
           mkdir -p tmp
           ghc -tmpdir tmp/ ${moduleToFile modSpec.moduleName} -c \
             -outputdir $out \
+            -dynamic-too \
             ${ghcOptsArgs} \
             2>&1
 

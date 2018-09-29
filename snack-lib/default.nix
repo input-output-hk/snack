@@ -16,7 +16,8 @@ with (callPackage ./package-spec.nix {});
 with (callPackage ./hpack.nix {});
 
 let
-  ghcWith = deps: haskellPackages.ghcWithPackages
+  iohkpkgs = import ../.. {};
+  ghcWith = deps: iohkpkgs.ghcWithPackages
     (ps: map (p: ps.${p}) deps);
 
   # Assumes the package description describes an executable
@@ -37,16 +38,16 @@ let
 
   libraryModSpecs = pkgSpec:
     let
-      moduleSpecFold' = modSpecFoldFromPackageSpec pkgSpec;
+      moduleSpecFold' = modSpecFoldFromPackageSpec ghcWith pkgSpec;
       modNames = listModulesInDir pkgSpec.packageBase;
       fld = moduleSpecFold' modSpecs';
       modSpecs' = foldDAG fld modNames;
       modSpecs = builtins.attrValues modSpecs';
-    in modSpecs;
+    in builtins.trace "${builtins.toJSON modNames}" modSpecs;
 
   executableMainModSpec = pkgSpec:
     let
-      moduleSpecFold' = modSpecFoldFromPackageSpec pkgSpec;
+      moduleSpecFold' = modSpecFoldFromPackageSpec ghcWith pkgSpec;
       mainModName = pkgSpec.packageMain;
       mainModSpec =
         let
@@ -154,11 +155,14 @@ in
     inferSnackGhci
     inferHPackBuild
     inferHPackGhci
-    packageYaml
     buildAsExecutable
     buildAsLibrary
     snackSpec
-    hpackSpec
+    hpackSpecs
     mkPackage
+    mkPackageSpec
+    listModulesInDir
+    listFilesInDir
+    flattenPackages
     ;
   }

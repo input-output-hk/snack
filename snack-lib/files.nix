@@ -59,7 +59,7 @@ rec {
           (path: ty:
             if ty == "directory"
             then
-              go "${dir}/${path}" "${dirName}${path}/"
+              go (dir +"/${path}") "${dirName}${path}/"
             else
               [ "${dirName}${path}" ]
           )

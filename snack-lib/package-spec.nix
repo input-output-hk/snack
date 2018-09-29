@@ -45,14 +45,12 @@ rec {
   # Traverses all transitive packages and returns the first package spec that
   # contains a module with given name. If none is found, returns the supplied
   # default value.
-  pkgSpecByModuleName = topPkgSpec: def: modName:
-    ( lib.findFirst
-        (pkgSpec:
-          lib.lists.elem
-            modName
-            (listModulesInDir pkgSpec.packageBase)
-        )
-        def
-        (flattenPackages topPkgSpec)
-    );
+  pkgSpecByModuleName = topPkgSpec:
+    let
+      flattened = flattenPackages topPkgSpec;
+      specToTable = pkgSpec: builtins.listToAttrs (map (modName: { name = modName; value = pkgSpec; }) (listModulesInDir pkgSpec.packageBase));
+      lookupTable = builtins.foldl' (state: value: (specToTable value) // state) {} flattened;
+      pkgSpecByModuleName' = def: modName:
+      (lookupTable.${modName} or def);
+    in pkgSpecByModuleName';
 }

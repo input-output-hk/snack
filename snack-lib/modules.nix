@@ -11,17 +11,18 @@ with (callPackage ./files.nix {});
 rec {
   # Turns a module name to a file
   moduleToFile = mod:
-    (lib.strings.replaceChars ["."] ["/"] mod) + ".hs";
+    (builtins.replaceStrings ["."] ["/"] mod) + ".hs";
 
   # Turns a module name into the filepath of its object file
   # TODO: bad name, this is module _name_ to object
   moduleToObject = mod:
-    (lib.strings.replaceChars ["."] ["/"] mod) + ".o";
+    (builtins.replaceStrings ["."] ["/"] mod) + ".o";
 
+  stripHs = lib.strings.removeSuffix ".hs";
   # Turns a filepath name to a module name
   fileToModule = file:
-    lib.strings.removeSuffix ".hs"
-      (lib.strings.replaceChars ["/"] ["."] file);
+    stripHs
+      (builtins.replaceStrings ["/"] ["."] file);
 
   # Singles out a given module (by module name) (derivation)
   singleOutModule = base: mod: singleOut base (moduleToFile mod);
@@ -39,7 +40,7 @@ rec {
   # Whether the file is a Haskell module or not. It uses very simple
   # heuristics: If the file starts with a capital letter, then yes.
   isHaskellModuleFile = f:
-    ! (builtins.isNull (builtins.match "[A-Z].*" f));
+    ! (builtins.isNull (builtins.match "[A-Z].*hs" f));
 
   listModulesInDir = dir:
     map fileToModule
@@ -65,6 +66,6 @@ rec {
       }
 
         ''
-          ${importParser} -XRankNTypes -XLambdaCase -XTypeApplications -XBangPatterns -pgmP cpphs -optP --cpp ${singleOutModulePath base modName} > $out
+          ${importParser} -XRankNTypes -XLambdaCase -XTypeApplications -XBangPatterns -XMultiWayIf -pgmP cpphs -optP --cpp ${singleOutModulePath base modName} > $out
         '';
 }

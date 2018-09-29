@@ -6,18 +6,13 @@
 with (callPackage ./modules.nix {});
 with (callPackage ./package-spec.nix {});
 with (callPackage ./lib.nix {});
+with (callPackage ./build.nix {});
 
 rec {
-    makeModuleSpec =
-    modName:
-    modImports:
-    modFiles:
-    modDirs:
-    modBase:
-    modDeps:
-    modExts:
-    modGhcOpts:
-    { moduleName = modName;
+  makeModuleSpec = { modName, modImports, modFiles, modDirs, modBase, modDeps, modExts, modGhcOpts, ghcWith }:
+  let
+    self = {
+      moduleName = modName;
 
       # local module imports, i.e. not part of an external dependency
       moduleImports = modImports;
@@ -31,16 +26,16 @@ rec {
         else abort "module dependencies should be a list";
       moduleGhcOpts = modGhcOpts;
       moduleExtensions = modExts;
+      allTransitiveDeps = allTransitiveDeps [ self ];
+      builtModule = buildModule ghcWith self;
     };
+  in self;
 
 
     moduleSpecFold =
       { baseByModuleName
-      , filesByModuleName
-      , dirsByModuleName
-      , depsByModuleName
-      , extsByModuleName
-      , ghcOptsByModuleName
+      , getInfoByModName
+      , ghcWith
       }:
       result:
     let
@@ -50,22 +45,23 @@ rec {
           (listModuleImports baseByModuleName modName);
     in
       # TODO: DFS instead of Fold
-      { f = modName:
-          { "${modName}" =
-          makeModuleSpec
-            modName
-            (map (mn: result.${mn}) (modImportsNames modName))
-            (filesByModuleName modName)
-            (dirsByModuleName modName)
-            (baseByModuleName modName)
-            (depsByModuleName modName)
-            (extsByModuleName modName)
-            (ghcOptsByModuleName modName);
+      {
+        f = modName: let info = getInfoByModName modName; in {
+          "${modName}" = makeModuleSpec {
+            inherit modName ghcWith;
+            modImports = map (mn: result.${mn}) (modImportsNames modName);
+            modFiles = info.files;
+            modDirs = info.dirs;
+            modBase = baseByModuleName modName;
+            modDeps = info.deps;
+            modExts = info.exts;
+            modGhcOpts = info.ghcOpts;
           };
+        };
         empty = {} ;
         reduce = a: b: a // b;
         elemLabel = lib.id;
-        elemChildren = modImportsNames;
+        elemChildren = modName: modImportsNames modName;
       };
 
   # Returns a list of all modules in the module spec graph
@@ -97,36 +93,26 @@ rec {
       ;
 
   # Takes a package spec and returns (modSpecs -> Fold)
-  modSpecFoldFromPackageSpec = pkgSpec:
+  modSpecFoldFromPackageSpec = ghcWith: pkgSpec:
       let
+        partial = pkgSpecByModuleName pkgSpec;
         baseByModuleName = modName:
-          let res = pkgSpecByModuleName pkgSpec null modName;
+          let res = partial null modName;
           in if res == null then null else res.packageBase;
-        depsByModuleName = modName:
-          (pkgSpecByModuleName
-            pkgSpec
-            (abort "asking dependencies for external module: ${modName}")
-            modName).packageDependencies
-            modName
-          ;
-        extsByModuleName = modName:
-          (pkgSpecByModuleName
-            pkgSpec
-            (abort "asking extensions for external module: ${modName}")
-            modName).packageExtensions;
-        ghcOptsByModuleName = modName:
-          (pkgSpecByModuleName
-            pkgSpec
-            (abort "asking ghc options for external module: ${modName}")
-            modName).packageGhcOpts;
+        partial2 = partial (abort "error near partial2");
+        getInfoByModName = modName: let
+          spec = partial2 modName;
+        in {
+          files = pkgSpec.packageExtraFiles modName;
+          deps = spec.packageDependencies modName;
+          exts = spec.packageExtensions;
+          ghcOpts = spec.packageGhcOpts;
+          dirs = spec.packageExtraDirectories modName;
+        };
       in
-        moduleSpecFold
-          { baseByModuleName = baseByModuleName;
-            filesByModuleName = pkgSpec.packageExtraFiles;
-            dirsByModuleName = pkgSpec.packageExtraDirectories;
-            depsByModuleName = depsByModuleName;
-            extsByModuleName = extsByModuleName;
-            ghcOptsByModuleName = ghcOptsByModuleName;
-          };
+      moduleSpecFold {
+        inherit getInfoByModName ghcWith;
+        baseByModuleName = baseByModuleName;
+      };
 
 }
