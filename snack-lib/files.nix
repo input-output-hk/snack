@@ -28,27 +28,9 @@ rec {
           then ""
           else x
         ) file;
+  in lib.cleanSourceWith  { filter = (pred file); src = src0; };
 
-    in stdenv.mkDerivation {
-      inherit name;
-      src = lib.cleanSourceWith  { filter = (pred file); src = src0; };
-      builder = writeScript (name + "-single-out")
-      # TODO: make sure the file actually exists and that there's only one
-      ''
-        echo "Singling out file ${file}"
-        source $stdenv/setup
-        mkdir -p $out
-        echo "Running: cp $src/${file} $out/${file}"
-        echo "Listing $src"
-        ls $src/**/*
-        mkdir -p $(dirname $out/${file})
-        cp $src/${file} $out/${file}
-        echo "Done: Singling out file ${file}"
-      '';
-    };
-
-  doesFileExist = base: filename:
-    lib.lists.elem filename (listFilesInDir base);
+  doesFileExist = base: filename: lib.lists.elem filename (listFilesInDir base);
 
   listFilesInDir = dir:
   let
@@ -57,8 +39,7 @@ rec {
       (
         lib.attrsets.mapAttrsToList
           (path: ty:
-            if ty == "directory"
-            then
+            if ty == "directory" then
               go (dir +"/${path}") "${dirName}${path}/"
             else
               [ "${dirName}${path}" ]

@@ -43,7 +43,7 @@ let
       fld = moduleSpecFold' modSpecs';
       modSpecs' = foldDAG fld modNames;
       modSpecs = builtins.attrValues modSpecs';
-    in builtins.trace "${builtins.toJSON modNames}" modSpecs;
+    in modSpecs;
 
   executableMainModSpec = pkgSpec:
     let
@@ -57,7 +57,7 @@ let
     in mainModSpec;
 
   buildAsLibrary = pkgSpec:
-    buildLibrary ghcWith (libraryModSpecs pkgSpec);
+    buildLibrary (libraryModSpecs pkgSpec);
 
   buildAsExecutable = pkgSpec:
     let drv = linkMainModule ghcWith (executableMainModSpec pkgSpec);

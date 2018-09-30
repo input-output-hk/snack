@@ -34,14 +34,15 @@ foldDAGRec =
         label = elemLabel elem;
         children = elemChildren elem;
       in
-        if lib.attrsets.hasAttr label traversed
-        then acc
-        else
-          let acc' =
-              { elem' = reduce elem' (f elem);
-                traversed = traversed // { ${label} = null; };
-              };
-          in foldDAGRec fld acc' children;
+      if traversed ? ${label} then
+        acc
+      else
+        let
+          acc' = {
+            elem' = reduce elem' (f elem);
+            traversed = traversed // { ${label} = null; };
+          };
+        in foldDAGRec fld acc' children;
   in lib.foldl insert acc0 roots;
 
 withAttr = obj: attrName: def: f:

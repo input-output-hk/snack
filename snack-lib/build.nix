@@ -15,23 +15,23 @@ rec {
   # Returns an attribute set where the keys are all the built module names and
   # the values are the paths to the object files.
   # mainModSpec: a "main" module
-  buildMain = ghcWith: mainModSpec:
-    buildModulesRec ghcWith
+  buildMain = mainModSpec:
+    buildModulesRec
       # XXX: the main modules need special handling regarding the object name
       {
         a."${mainModSpec.moduleName}" = mainModSpec;
-        b."${mainModSpec.moduleName}" = "${buildModule ghcWith mainModSpec}/Main.o";
+        b."${mainModSpec.moduleName}" = "${buildModule mainModSpec}/Main.o";
       }
       mainModSpec.moduleImports;
 
   # returns a attrset where the keys are the module names and the values are
   # the modules' object file path
-  buildLibrary = ghcWith: modSpecs:
-    buildModulesRec ghcWith { a = {}; b = {}; } modSpecs;
+  buildLibrary = modSpecs:
+    buildModulesRec { a = {}; b = {}; } modSpecs;
 
   linkMainModule = ghcWith: mod: # main module
     let
-      objAttrs = buildMain ghcWith mod;
+      objAttrs = buildMain mod;
       objList = lib.attrsets.mapAttrsToList (x: y: y) objAttrs;
       deps = allTransitiveDeps [mod];
       ghc = ghcWith deps;
@@ -56,7 +56,7 @@ rec {
   # Build the given modules (recursively) using the given accumulator to keep
   # track of which modules have been built already
   # XXX: doesn't work if several modules in the DAG have the same name
-  buildModulesRec = ghcWith: empty: modSpecs: let
+  buildModulesRec = empty: modSpecs: let
       flattenModNamesFold = {
         f = modSpec: {
           ${modSpec.moduleName} = modSpec;
@@ -79,28 +79,21 @@ rec {
     }
     allModules;
 
-  buildModule = ghcWith: modSpec:
+  buildModule = modSpec:
     let
-      ghc = ghcWith deps;
-      deps = modSpec.allTransitiveDeps;
-      exts = modSpec.moduleExtensions;
-      ghcOpts = modSpec.moduleGhcOpts ++ (map (x: "-X${x}") exts);
-      ghcOptsArgs = lib.strings.escapeShellArgs ghcOpts;
-      objectName = modSpec.moduleName;
-      builtDeps = map (modSpec: modSpec.builtModule) (allTransitiveImports [modSpec]);
-      depsDirs = map (x: x + "/") builtDeps;
-      base = modSpec.moduleBase;
-      makeSymtree =
-        if lib.lists.length depsDirs >= 1
-        # TODO: symlink instead of copy
-        then "rsync -r --chmod=D+w ${lib.strings.escapeShellArgs depsDirs} ."
-        else "";
-      makeSymModule =
-        # TODO: symlink instead of copy
-        "rsync -r ${singleOutModule base modSpec.moduleName}/ .";
+      ghcOptsArgs = lib.strings.escapeShellArgs (modSpec.moduleGhcOpts ++ (map (x: "-X${x}") modSpec.moduleExtensions));
+      makeSymtree = if lib.lists.length modSpec.builtDeps >= 1 then
+        let
+          depsDirs = map (x: x + "/") modSpec.builtDeps;
+        in
+          # TODO: symlink instead of copy
+          "rsync -r --chmod=D+w ${lib.strings.escapeShellArgs depsDirs} ."
+      else "";
+      # TODO: symlink instead of copy
+      makeSymModule = "rsync -r ${singleOutModule modSpec.moduleBase modSpec.moduleName}/ .";
       pred = file: path: type:
         let
-          topLevel = (builtins.toString base) + "/";
+          topLevel = (builtins.toString modSpec.moduleBase) + "/";
           actual = (lib.strings.removePrefix topLevel path);
           expected = file;
       in
@@ -112,7 +105,7 @@ rec {
           lib.lists.length
             (
             let
-              topLevel = (builtins.toString base) + "/";
+              topLevel = (builtins.toString modSpec.moduleBase) + "/";
               actual = lib.strings.removePrefix topLevel p;
             in
               lib.filter (expected:
@@ -121,26 +114,19 @@ rec {
                 )
                 modSpec.moduleFiles
             ) >= 1
-        ) base;
+        ) modSpec.moduleBase;
       joinedSrc = symlinkJoin {
         name = "extra-files";
         paths = [ extraFiles ] ++ modSpec.moduleDirectories;
       };
       src' = if builtins.length ([ extraFiles ] ++ modSpec.moduleDirectories) == 1 then builtins.head ([ extraFiles ] ++ modSpec.moduleDirectories) else joinedSrc;
     in stdenv.mkDerivation {
-      name = objectName;
+      name = modSpec.moduleName;
       src = src';
-      phases =
-        [ "unpackPhase" "buildPhase" ];
+      phases = [ "unpackPhase" "buildPhase" ];
 
-      imports = map (mmm: mmm.moduleName) modSpec.moduleImports;
-      buildPhase =
-        ''
+      buildPhase = ''
           echo "Building module ${modSpec.moduleName}"
-          echo "Local imports are:"
-          for foo in $imports; do
-            echo " - $foo"
-          done
 
           mkdir -p $out
           echo "Creating dependencies symtree for module ${modSpec.moduleName}"
@@ -172,9 +158,6 @@ rec {
           echo "Done building module ${modSpec.moduleName}"
         '';
 
-      buildInputs =
-        [ ghc
-          rsync
-        ];
+      buildInputs = [ modSpec.ghcWithDeps rsync ];
     };
 }

@@ -27,22 +27,26 @@ rec {
       moduleGhcOpts = modGhcOpts;
       moduleExtensions = modExts;
       allTransitiveDeps = allTransitiveDeps [ self ];
-      builtModule = buildModule ghcWith self;
+      allTransitiveImports = allTransitiveImports [ self ];
+      ghcWithDeps = ghcWith self.allTransitiveDeps;
+      builtModule = buildModule self;
+      builtDeps = map (modSpec: modSpec.builtModule) self.allTransitiveImports;
     };
   in self;
 
 
     moduleSpecFold =
-      { baseByModuleName
-      , getInfoByModName
+      { getInfoByModName
       , ghcWith
       }:
       result:
     let
-      modImportsNames = modName:
+      modImportsNames = modName: let
+      info = getInfoByModName modName;
+      in
         lib.lists.filter
-          (modName': ! builtins.isNull (baseByModuleName modName'))
-          (listModuleImports baseByModuleName modName);
+          (modName': ! builtins.isNull (getInfoByModName modName').base )
+          (listModuleImports info.base modName info.exts);
     in
       # TODO: DFS instead of Fold
       {
@@ -52,7 +56,7 @@ rec {
             modImports = map (mn: result.${mn}) (modImportsNames modName);
             modFiles = info.files;
             modDirs = info.dirs;
-            modBase = baseByModuleName modName;
+            modBase = info.base;
             modDeps = info.deps;
             modExts = info.exts;
             modGhcOpts = info.ghcOpts;
@@ -78,31 +82,24 @@ rec {
   allTransitiveLists = attr: modSpecs:
     lib.lists.unique
     (
-    foldDAG
-      { f = modSpec:
-          lib.lists.foldl
-            (x: y: x ++ [y])
-            [] modSpec.${attr};
+      foldDAG {
+        f = modSpec: modSpec.${attr};
         empty = [];
         elemLabel = modSpec: modSpec.moduleName;
         reduce = a: b: a ++ b;
         elemChildren = modSpec: modSpec.moduleImports;
       }
       modSpecs
-    )
-      ;
+    );
 
   # Takes a package spec and returns (modSpecs -> Fold)
   modSpecFoldFromPackageSpec = ghcWith: pkgSpec:
       let
-        partial = pkgSpecByModuleName pkgSpec;
-        baseByModuleName = modName:
-          let res = partial null modName;
-          in if res == null then null else res.packageBase;
-        partial2 = partial (abort "error near partial2");
+        partial = pkgSpecByModuleName pkgSpec null;
         getInfoByModName = modName: let
-          spec = partial2 modName;
+          spec = partial modName;
         in {
+          base = if spec == null then null else spec.packageBase;
           files = pkgSpec.packageExtraFiles modName;
           deps = spec.packageDependencies modName;
           exts = spec.packageExtensions;
@@ -112,7 +109,6 @@ rec {
       in
       moduleSpecFold {
         inherit getInfoByModName ghcWith;
-        baseByModuleName = baseByModuleName;
       };
 
 }
